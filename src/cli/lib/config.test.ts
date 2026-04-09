@@ -444,6 +444,39 @@ test("parseProjectConfig - warns about unknown properties", async () => {
   expect(stripVTControlCharacters(stderr5)).not.toContain("Unknown");
 });
 
+test("parseProjectConfig - aiFiles fields", async () => {
+  await assertParses(
+    {
+      functions: "convex/",
+      aiFiles: {
+        enabled: false,
+        disableStalenessMessage: true,
+        skills: {
+          agents: ["cursor", "windsurf"],
+        },
+      },
+    },
+    {
+      functions: "convex/",
+      aiFiles: {
+        enabled: false,
+        disableStalenessMessage: true,
+        skills: {
+          agents: ["cursor", "windsurf"],
+        },
+      },
+      codegen: {
+        staticApi: false,
+        staticDataModel: false,
+      },
+      generateCommonJSApi: false,
+      node: {
+        externalPackages: [],
+      },
+    },
+  );
+});
+
 // AuthKit configuration tests
 test("parseProjectConfig - authKit basic valid configs", async () => {
   // Basic config with no settings
@@ -916,7 +949,11 @@ describe("writeAiFilesConfig", () => {
     fs.writeFileSync(
       path.join(tmpDir, "convex.json"),
       JSON.stringify(
-        { functions: "src/convex/", customKey: "preserved" },
+        {
+          functions: "src/convex/",
+          customKey: "preserved",
+          aiFiles: { skills: { agents: ["cursor"] } },
+        },
         null,
         2,
       ),

@@ -45,6 +45,8 @@ vi.mock("child_process", () => ({
   },
 }));
 
+import child_process from "child_process";
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -101,6 +103,55 @@ describe("ai-files integration with default convex/ directory", () => {
     expect(fs.readFileSync(guidelinesPath(), "utf8")).toBe(
       "integration guidelines content",
     );
+
+    // Default agents
+    expect(vi.mocked(child_process.spawn)).toHaveBeenCalledWith(
+      "npx",
+      expect.arrayContaining([
+        "add",
+        "get-convex/agent-skills",
+        "--yes",
+        "--agent",
+        "claude-code",
+        "--agent",
+        "codex",
+      ]),
+      expect.any(Object),
+    );
+  });
+
+  test("install respects explicit agent configuration", async () => {
+    await installAiFiles({
+      projectDir: tmpDir,
+      convexDir,
+      aiFilesConfig: { skills: { agents: ["cursor", "windsurf"] } },
+    });
+
+    expect(vi.mocked(child_process.spawn)).toHaveBeenCalledWith(
+      "npx",
+      expect.arrayContaining([
+        "add",
+        "get-convex/agent-skills",
+        "--yes",
+        "--agent",
+        "cursor",
+        "--agent",
+        "windsurf",
+      ]),
+      expect.any(Object),
+    );
+  });
+
+  test("install skips skills CLI when configured agents are empty", async () => {
+    await installAiFiles({
+      projectDir: tmpDir,
+      convexDir,
+      aiFilesConfig: { skills: { agents: [] } },
+    });
+
+    expect(fs.existsSync(guidelinesPath())).toBe(true);
+    expect(fs.existsSync(statePath())).toBe(true);
+    expect(vi.mocked(child_process.spawn)).not.toHaveBeenCalled();
   });
 
   test("preserves existing AGENTS.md content and injects managed section", async () => {
