@@ -5,6 +5,7 @@ import { test, expect, describe, vi } from "vitest";
 import ws from "ws";
 
 import { ConvexReactClient, createMutation, useQuery } from "./client.js";
+import { convexQueryOptions } from "../browser/query_options.js";
 import { ConvexProvider } from "./index.js";
 import React from "react";
 import { renderHook } from "@testing-library/react";
@@ -113,6 +114,46 @@ describe("useQuery", () => {
     expect(result.current).toStrictEqual(undefined);
   });
 
+  test("object form returns success result", () => {
+    const client = createClientWithQuery();
+    const wrapper = ({ children }: any) => (
+      <ConvexProvider client={client}>{children}</ConvexProvider>
+    );
+    const { result } = renderHook(
+      () =>
+        useQuery({
+          query: anyApi.myQuery.default,
+          args: {},
+        }),
+      { wrapper },
+    );
+    expect(result.current).toStrictEqual({
+      data: "queryResult",
+      error: undefined,
+      status: "success",
+    });
+  });
+
+  test("object form returns pending when skipped", () => {
+    const client = createClientWithQuery();
+    const wrapper = ({ children }: any) => (
+      <ConvexProvider client={client}>{children}</ConvexProvider>
+    );
+    const { result } = renderHook(
+      () =>
+        useQuery({
+          query: anyApi.myQuery.default,
+          args: "skip",
+        }),
+      { wrapper },
+    );
+    expect(result.current).toStrictEqual({
+      data: undefined,
+      error: undefined,
+      status: "pending",
+    });
+  });
+
   test("Optimistic update handlers can’t be async", () => {
     const client = testConvexReactClient();
     const mutation = createMutation(
@@ -190,5 +231,29 @@ describe("async query fetch", () => {
     optimisticUpdate();
     const queryResult = client.query(anyApi.myQuery.default, {});
     expect(await queryResult).toStrictEqual("queryResult");
+  });
+});
+
+describe("prewarmQuery types", () => {
+  test("accepts QueryOptions shape", () => {
+    const client = testConvexReactClient();
+    const opts = convexQueryOptions({
+      query: makeFunctionReference<"query", { name: string }, string>(
+        "myQuery",
+      ),
+      args: { name: "hi" },
+    });
+    client.prewarmQuery(opts);
+  });
+
+  test("accepts extendSubscriptionFor on prewarmQuery", () => {
+    const client = testConvexReactClient();
+    client.prewarmQuery({
+      query: makeFunctionReference<"query", { name: string }, string>(
+        "myQuery",
+      ),
+      args: { name: "hi" },
+      extendSubscriptionFor: 10_000,
+    });
   });
 });

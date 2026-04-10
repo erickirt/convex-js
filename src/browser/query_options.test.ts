@@ -1,7 +1,6 @@
 import { test } from "vitest";
 import { makeFunctionReference } from "../server/index.js";
 import { EmptyObject } from "../server/registration.js";
-import { ConvexReactClient } from "../react/client.js";
 import { convexQueryOptions } from "./query_options.js";
 
 const apiQueryFuncWithArgs = makeFunctionReference<
@@ -41,12 +40,4 @@ test("convexQueryOptions", async () => {
     // @ts-expect-error This should be an error
     args: { name: "hey" },
   });
-});
-
-test("prewarmQuery types", async () => {
-  const client = {
-    prewarmQuery: () => {},
-  } as unknown as ConvexReactClient;
-
-  client.prewarmQuery({ query: apiQueryFuncWithArgs, args: { name: "hi" } });
 });
