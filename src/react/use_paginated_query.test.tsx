@@ -22,6 +22,8 @@ import type {
   PaginatedQueryArgs,
   PaginatedQueryItem,
   PaginatedQueryReference,
+  UsePaginatedQueryObjectReturnType,
+  UsePaginatedQueryReturnType,
 } from "./use_paginated_query.js";
 import {
   resetPaginationId,
@@ -133,6 +135,124 @@ describe.each([
       },
     );
 
+    function pushFirstPageError(client: ConvexReactClient, message: string) {
+      act(() => {
+        void client.mutation(
+          anyApi.myMutation.default,
+          {},
+          {
+            optimisticUpdate: (localStore) => {
+              localStore.setQuery(
+                anyApi.myQuery.default,
+                {
+                  paginationOpts: {
+                    numItems: 10,
+                    cursor: null,
+                    id: 1,
+                  },
+                },
+                new Error(
+                  message,
+                ) as unknown as FunctionReturnType<PaginatedQueryReference>,
+              );
+            },
+          },
+        );
+      });
+    }
+
+    test("Object options default to non-throwing error state", () => {
+      if (version === "client-based logic") {
+        return;
+      }
+      const convexClient = new ConvexReactClient(address);
+      resetPaginationId();
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <ConvexProvider client={convexClient}>{children}</ConvexProvider>
+      );
+
+      const { result } = renderHook(
+        () =>
+          usePaginatedQuery({
+            query: makeFunctionReference<"query">("myQuery"),
+            args: {},
+            initialNumItems: 10,
+          }),
+        { wrapper },
+      );
+
+      pushFirstPageError(convexClient, "boom-default");
+
+      if (result.current.status !== "error") {
+        throw new Error("Expected error status");
+      }
+      expect(result.current.error.message).toBe("boom-default");
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.canLoadMore).toBe(false);
+      expect(result.current.data).toEqual([]);
+    });
+
+    test("Object options throw when throwOnError is true", () => {
+      if (version === "client-based logic") {
+        return;
+      }
+      const convexClient = new ConvexReactClient(address);
+      resetPaginationId();
+      let lastError: Error | undefined;
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <ErrorBoundary onError={(e) => (lastError = e)}>
+          <ConvexProvider client={convexClient}>{children}</ConvexProvider>
+        </ErrorBoundary>
+      );
+
+      renderHook(
+        () =>
+          usePaginatedQuery({
+            query: makeFunctionReference<"query">("myQuery"),
+            args: {},
+            initialNumItems: 10,
+            throwOnError: true,
+          }),
+        { wrapper },
+      );
+
+      pushFirstPageError(convexClient, "boom-throw");
+
+      expect(lastError).toBeDefined();
+      expect(lastError?.message).toBe("boom-throw");
+    });
+
+    test("Positional form continues throwing on errors", () => {
+      if (version === "client-based logic") {
+        return;
+      }
+      const convexClient = new ConvexReactClient(address);
+      resetPaginationId();
+      let lastError: Error | undefined;
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <ErrorBoundary onError={(e) => (lastError = e)}>
+          <ConvexProvider client={convexClient}>{children}</ConvexProvider>
+        </ErrorBoundary>
+      );
+
+      renderHook(
+        () =>
+          usePaginatedQuery(
+            makeFunctionReference<"query">("myQuery"),
+            {},
+            {
+              initialNumItems: 10,
+            },
+          ),
+        { wrapper },
+      );
+
+      pushFirstPageError(convexClient, "boom-positional");
+
+      expect(lastError).toBeDefined();
+      expect(lastError?.message).toBe("boom-positional");
+    });
+
     test("Returns nothing when args are 'skip'", () => {
       const convexClient = new ConvexReactClient(address);
       const watchQuerySpy =
@@ -156,6 +276,75 @@ describe.each([
         isLoading: true,
         results: [],
         status: "LoadingFirstPage",
+      });
+    });
+
+    test("Returns nothing when object-form args are 'skip'", () => {
+      const convexClient = new ConvexReactClient(address);
+      // The experimental path subscribes through watchPaginatedQuery directly,
+      // while the original implementation still goes through watchQuery.
+      const subscriptionSpy =
+        version === "hook-based logic"
+          ? vi.spyOn(convexClient, "watchQuery")
+          : vi.spyOn(convexClient, "watchPaginatedQuery");
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <ConvexProvider client={convexClient}>{children}</ConvexProvider>
+      );
+
+      const { result } = renderHook(
+        () =>
+          usePaginatedQuery({
+            query: makeFunctionReference<"query">("myQuery"),
+            args: "skip",
+            initialNumItems: 10,
+          }),
+        { wrapper },
+      );
+
+      expect(subscriptionSpy.mock.calls).toEqual([]);
+      expect(result.current).toMatchObject({
+        isLoading: true,
+        data: undefined,
+        status: "pending",
+        canLoadMore: false,
+      });
+    });
+
+    test("Initially returns pending for object options", () => {
+      const convexClient = new ConvexReactClient(address);
+      const watchQuerySpy = vi.spyOn(convexClient, "watchQuery");
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <ConvexProvider client={convexClient}>{children}</ConvexProvider>
+      );
+
+      const { result } = renderHook(
+        () =>
+          usePaginatedQuery({
+            query: makeFunctionReference<"query">("myQuery"),
+            args: {},
+            initialNumItems: 10,
+          }),
+        { wrapper },
+      );
+
+      if (version === "hook-based logic") {
+        expect(watchQuerySpy.mock.calls[1]).toEqual([
+          makeFunctionReference("myQuery"),
+          {
+            paginationOpts: {
+              cursor: null,
+              id: expect.anything(),
+              numItems: 10,
+            },
+          },
+          { journal: undefined },
+        ]);
+      }
+      expect(result.current).toMatchObject({
+        isLoading: true,
+        data: undefined,
+        status: "pending",
+        canLoadMore: false,
       });
     });
 
@@ -491,6 +680,70 @@ describe.each([
         >;
         type ActualReturnType = PaginatedQueryItem<MyQueryFunction>;
         assert<Equals<ActualReturnType, ReturnType>>();
+      });
+    });
+
+    describe("UsePaginatedQueryObjectReturnType", () => {
+      type MyQuery = FunctionReference<
+        "query",
+        "public",
+        { paginationOpts: PaginationOptions },
+        PaginationResult<string>
+      >;
+
+      test("object-form return type includes error variant", () => {
+        type ObjResult = UsePaginatedQueryObjectReturnType<MyQuery>;
+        type ErrorVariant = Extract<ObjResult, { status: "error" }>;
+        assert<
+          Equals<
+            ErrorVariant,
+            {
+              data: string[];
+              status: "error";
+              canLoadMore: false;
+              isLoading: false;
+              error: Error;
+              loadMore: (numItems: number) => void;
+            }
+          >
+        >();
+      });
+
+      test("positional-form return type does NOT include error variant", () => {
+        type PosResult = UsePaginatedQueryReturnType<MyQuery>;
+        type ErrorVariant = Extract<PosResult, { status: "error" }>;
+        assert<Equals<ErrorVariant, never>>();
+      });
+
+      test("object-form pending variant allows data during load-more", () => {
+        type ObjResult = UsePaginatedQueryObjectReturnType<MyQuery>;
+        type PendingVariants = Extract<ObjResult, { status: "pending" }>;
+        type PendingData = PendingVariants["data"];
+        assert<Equals<PendingData, string[] | undefined>>();
+      });
+
+      test("narrowing on status === 'error' gives access to error field", () => {
+        type ObjResult = UsePaginatedQueryObjectReturnType<MyQuery>;
+        type NarrowedError = Extract<ObjResult, { status: "error" }>["error"];
+        assert<Equals<NarrowedError, Error>>();
+      });
+
+      test("success variant has canLoadMore as boolean", () => {
+        type ObjResult = UsePaginatedQueryObjectReturnType<MyQuery>;
+        type SuccessVariant = Extract<ObjResult, { status: "success" }>;
+        assert<
+          Equals<
+            SuccessVariant,
+            {
+              data: string[];
+              status: "success";
+              canLoadMore: boolean;
+              isLoading: false;
+              error: undefined;
+              loadMore: (numItems: number) => void;
+            }
+          >
+        >();
       });
     });
 
