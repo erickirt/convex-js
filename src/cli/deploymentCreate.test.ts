@@ -14,7 +14,11 @@ import {
   deploymentNameFromSelection,
 } from "./lib/deploymentSelection.js";
 import { saveSelectedDeployment } from "./deploymentSelect.js";
-import { deploymentCreate, resolveRegionDetails } from "./deploymentCreate.js";
+import {
+  deploymentCreate,
+  resolveRegionDetails,
+  resolveClassDetails,
+} from "./deploymentCreate.js";
 import { ensureBackendBinaryDownloaded } from "./lib/localDeployment/download.js";
 import {
   loadProjectLocalConfig,
@@ -80,6 +84,21 @@ const mockRegions = [
   },
 ];
 
+const mockClasses = [
+  {
+    type: "s16" as const,
+    available: true,
+  },
+  {
+    type: "s256" as const,
+    available: true,
+  },
+  {
+    type: "d1024" as const,
+    available: false,
+  },
+];
+
 const mockPlatformGet = vi.fn();
 const mockPlatformPost = vi.fn();
 const mockBigBrainGet = vi.fn();
@@ -127,7 +146,15 @@ const createdDeployment = {
 
 function setupPlatformForCreate(overrides?: Record<string, unknown>) {
   setupPlatformClient();
-  mockPlatformGet.mockResolvedValue({ data: { items: mockRegions } });
+  mockPlatformGet.mockImplementation((path: string) => {
+    if (path === "/teams/{team_id}/list_deployment_regions") {
+      return { data: { items: mockRegions } };
+    }
+    if (path === "/teams/{team_id}/list_deployment_classes") {
+      return { data: { items: mockClasses } };
+    }
+    throw new Error(`Unmocked GET route: ${path}`);
+  });
   mockPlatformPost.mockResolvedValue({
     data: { ...createdDeployment, ...overrides },
   });
@@ -302,11 +329,12 @@ describe("non-interactive create flow", () => {
       );
     });
 
-    test.each(["region", "default", "expiration"] as const)(
+    test.each(["region", "class", "default", "expiration"] as const)(
       "rejects --%s with local",
       async (flag) => {
         const args = ["local", `--${flag}`];
         if (flag === "region") args.push("us");
+        if (flag === "class") args.push("s16");
         if (flag === "expiration") args.push("none");
 
         await expect(
@@ -474,6 +502,69 @@ describe("non-interactive create flow", () => {
       expect(process.stderr.write).toHaveBeenCalledWith(
         expect.stringContaining('Invalid region "invalid-region"'),
       );
+    });
+
+    test("creates a deployment with --class", async () => {
+      setupPlatformForCreate();
+
+      await deploymentCreate.parseAsync(
+        ["my-deployment", "--type", "dev", "--class", "s256"],
+        { from: "user" },
+      );
+
+      expect(mockPlatformGet).toHaveBeenCalledWith(
+        "/teams/{team_id}/list_deployment_classes",
+        expect.objectContaining({
+          params: { path: { team_id: "456" } },
+        }),
+      );
+      expect(mockPlatformPost).toHaveBeenCalledWith(
+        "/projects/{project_id}/create_deployment",
+        expect.objectContaining({
+          body: expect.objectContaining({
+            class: "s256",
+          }),
+        }),
+      );
+    });
+
+    test("fails with invalid --class", async () => {
+      setupPlatformForCreate();
+
+      await expect(
+        deploymentCreate.parseAsync(
+          ["my-deployment", "--type", "dev", "--class", "invalid-class"],
+          { from: "user" },
+        ),
+      ).rejects.toThrow();
+      expect(process.stderr.write).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid class "invalid-class"'),
+      );
+    });
+
+    test("fails with unavailable --class", async () => {
+      setupPlatformForCreate();
+
+      await expect(
+        deploymentCreate.parseAsync(
+          ["my-deployment", "--type", "dev", "--class", "d1024"],
+          { from: "user" },
+        ),
+      ).rejects.toThrow();
+      expect(process.stderr.write).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid class "d1024"'),
+      );
+    });
+
+    test("no --class flag does not include class in body", async () => {
+      setupPlatformForCreate();
+
+      await deploymentCreate.parseAsync(["my-deployment", "--type", "dev"], {
+        from: "user",
+      });
+
+      const call = mockPlatformPost.mock.calls[0];
+      expect(call[1].body).not.toHaveProperty("class");
     });
 
     test("creates a deployment with --select calls saveSelectedDeployment", async () => {
@@ -718,6 +809,9 @@ describe("interactive create flow", () => {
       "/teams/{team_id}/list_deployment_regions": () => ({
         items: mockRegions,
       }),
+      "/teams/{team_id}/list_deployment_classes": () => ({
+        items: mockClasses,
+      }),
     });
     mockBigBrainGet.mockResolvedValue({
       data: [{ id: 456, slug: "my-team", defaultRegion: "aws-us-east-1" }],
@@ -960,6 +1054,32 @@ describe("resolveRegionDetails", () => {
 
   test("returns null on unavailable region", () => {
     const result = resolveRegionDetails(availableRegions, "aws-ap-southeast-1");
+    expect(result).toBeNull();
+  });
+});
+
+const availableClasses = mockClasses.filter((c) => c.available);
+
+describe("resolveClassDetails", () => {
+  test("resolves class by type", () => {
+    const result = resolveClassDetails(availableClasses, "s16");
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe("s16");
+  });
+
+  test("resolves another class by type", () => {
+    const result = resolveClassDetails(availableClasses, "s256");
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe("s256");
+  });
+
+  test("returns null on unknown class", () => {
+    const result = resolveClassDetails(availableClasses, "invalid-class");
+    expect(result).toBeNull();
+  });
+
+  test("returns null on unavailable class", () => {
+    const result = resolveClassDetails(availableClasses, "d1024");
     expect(result).toBeNull();
   });
 });
