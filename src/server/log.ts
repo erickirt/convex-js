@@ -7,9 +7,6 @@ interface Log {
   vars: typeof vars;
 }
 
-/**
- * @internal
- */
 export const log: Log = {
   audit,
   vars,

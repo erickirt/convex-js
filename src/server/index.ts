@@ -204,13 +204,7 @@ export type {
  */
 export type { Index, SearchIndex, VectorIndex } from "./schema.js";
 
-/**
- * @internal
- */
 export { log } from "./log.js";
-/**
- * @internal
- */
 export type { AuditLogBody, AuditLogValue } from "./audit_logging.js";
 
 export type {
